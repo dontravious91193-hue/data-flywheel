@@ -1,0 +1,59 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Anthropic SDK
+        run: pip install anthropic requests
+
+      - name: Run AI Code Review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 - <<'EOF_PY'
+          import os
+          import subprocess
+          import anthropic
+
+          client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+
+          diff = subprocess.check_output(["git", "diff", "HEAD~1"]).decode("utf-8")
+          
+          if not diff.strip():
+              print("No changes found to review.")
+              exit(0)
+
+          prompt = f"Please review the following code changes for bugs, security issues, and style improvements:\n\n{diff}"
+
+          response = client.messages.create(
+              model="claude-3-5-sonnet-20241022",
+              max_tokens=1000,
+              messages=[{"role": "user", "content": prompt}]
+          )
+          
+          review_comment = response.content[0].text
+          print("--- Claude Review ---")
+          print(review_comment)
+          EOF_PY
